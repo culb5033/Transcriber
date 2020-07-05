@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "Transcriber": {
+      "commandName": "Project",
+      "commandLineArgs": "transcribe -i \"C:\\Users\\Domn Werner\\Desktop\\Sandbox\\male.wav\" -o \"C:\\Users\\Domn Werner\\Desktop\\Sandbox\\output.txt\""
+    }
+  }
+}

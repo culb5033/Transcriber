@@ -3,12 +3,13 @@ using CliFx.Attributes;
 using Microsoft.CognitiveServices.Speech;
 using Microsoft.CognitiveServices.Speech.Audio;
 using System;
+using System.Diagnostics;
 using System.IO;
 using System.Threading.Tasks;
 
 namespace Transcriber
 {
-    [Command]
+    [Command("transcribe")]
     public class TranscribeCommand : ICommand
     {
         [CommandOption("key", 'k', Description = "Azure Cognitive Services API Key.",
@@ -32,47 +33,68 @@ namespace Transcriber
             using var recognizer = new SpeechRecognizer(config, audioInput);
 
             var stopRecognition = new TaskCompletionSource<int>();
-            Console.Clear();
-            recognizer.Recognizing += (o, e) =>
-            {                
-                Console.SetCursorPosition(0, 0);
-                Console.Write(e.Result.Text);
-            };
+            await console.Output.WriteLineAsync($"Recognizing text and writing to file \"{OutputFile.FullName}\".");
 
-            recognizer.Recognized += OnSpeechRecognized;            
+            var sw = new Stopwatch();
+            using var fileStream = File.OpenWrite(OutputFile.FullName);
+            using var fileWriter = new StreamWriter(fileStream);
 
+            recognizer.Recognized += async (o, e) => await OnSpeechRecognized(o, e);
+
+            sw.Start();
             await recognizer.StartContinuousRecognitionAsync().ConfigureAwait(false);
 
             Task.WaitAny(new[] { stopRecognition.Task });
 
             await recognizer.StopContinuousRecognitionAsync().ConfigureAwait(false);
 
-            void OnSpeechRecognized(object sender, SpeechRecognitionEventArgs e)
+            await console.Output.WriteLineAsync("Done recognizing.");
+            await console.Output.WriteLineAsync($"Output saved to \"{OutputFile.FullName}\".");
+
+            async Task OnSpeechRecognized(object sender, SpeechRecognitionEventArgs e)
             {
                 var result = e.Result;
+                var elapsed = sw.Elapsed;
+                var hour = elapsed.Hours;
+                var mins = elapsed.Minutes;
+                var secs = elapsed.Seconds;
 
                 switch (result.Reason)
                 {
                     case ResultReason.RecognizedSpeech:
-                        console.Output.Write($"We recognized: {result.Text}");
+                        var recOut = $"[{hour}:{mins}:{secs}] {result.Text}";
+                        await fileWriter.WriteLineAsync(recOut);
+                        await fileWriter.FlushAsync();
+                        await console.Output.WriteLineAsync(recOut);
                         break;
                     case ResultReason.NoMatch:
-                        console.Output.WriteLine($"NOMATCH: Speech could not be recognized.");
+                        var nmOut = $"[{hour}:{mins}:{secs}] Speech could not be recognized.";
+                        await fileWriter.WriteLineAsync(nmOut);
+                        await fileWriter.FlushAsync();
+                        await console.Output.WriteLineAsync(nmOut);
                         break;
                     case ResultReason.Canceled:
                         var cancellation = CancellationDetails.FromResult(result);
-                        console.Output.WriteLine($"CANCELED: Reason={cancellation.Reason}");
+                        var cOut = $"[{hour}:{mins}:{secs}] Canceled for the following reason \"{cancellation.Reason}\".";
+
+                        await fileWriter.WriteLineAsync(cOut);
 
                         if (cancellation.Reason == CancellationReason.Error)
                         {
-                            console.Output.WriteLine($"CANCELED: ErrorCode={cancellation.ErrorCode}");
-                            console.Output.WriteLine($"CANCELED: ErrorDetails={cancellation.ErrorDetails}");
-                            console.Output.WriteLine($"CANCELED: Did you update the subscription info?");
+                            var cReason = $"[{hour}:{mins}:{secs}] Canceled with error code \"{cancellation.ErrorCode}\". " +
+                                $"Error details: \"{cancellation.ErrorDetails}\". " +
+                                $"Did you update the subscription info?";
+                            await fileWriter.WriteLineAsync(cReason);
+                            await console.Output.WriteLineAsync(cReason);
                         }
+                        await fileWriter.FlushAsync();
                         stopRecognition.TrySetResult(0);
                         break;
                     default:
-                        console.Output.WriteLine("ERROR: An unknown problem ocurred.");
+                        var dOut = $"[{hour}:{mins}:{secs}] ERROR: An unknown problem ocurred.";
+                        await fileWriter.WriteLineAsync(dOut);
+                        await fileWriter.FlushAsync();
+                        await console.Output.WriteLineAsync(dOut);
                         break;
                 }
             }
